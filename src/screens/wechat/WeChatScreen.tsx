@@ -1074,9 +1074,10 @@ export function WeChatScreen() {
       : null;
 
   const headerTitle =
-    (activeProfile && (mode === "profile" || (tab === "chats" && activeChatId))) ?
-      (activeProfile.remark || "未命名好友") :
-      "微信 · 软糯糯";
+    tab === "me" ? "我" :
+      (activeProfile && (mode === "profile" || (tab === "chats" && activeChatId))) ?
+        (activeProfile.remark || "未命名好友") :
+        "微信 · 软糯糯";
 
   return (
     <div className="screen wechat-screen">

@@ -95,7 +95,7 @@ export function EmojiPackPage() {
   if (mode === "group" && selectedGroup) {
     return (
       <div className="emoji-pack-page">
-        <div className="emoji-pack-header">
+        <div className="emoji-pack-header emoji-pack-header-decorated">
           <button
             type="button"
             className="emoji-pack-back-btn"
@@ -106,7 +106,10 @@ export function EmojiPackPage() {
           >
             ←
           </button>
-          <div className="emoji-pack-title">{selectedGroup.name}</div>
+          <div className="emoji-pack-title-wrapper">
+            <div className="emoji-pack-title-icon">📦</div>
+            <div className="emoji-pack-title">{selectedGroup.name}</div>
+          </div>
           <button
             type="button"
             className="emoji-pack-add-btn"
@@ -119,22 +122,14 @@ export function EmojiPackPage() {
         <div className="emoji-pack-content">
           {selectedGroup.emojis.length === 0 ? (
             <div className="emoji-pack-empty">
-              <div className="emoji-pack-empty-decoration">
-                <div className="emoji-pack-empty-star">✨</div>
-                <div className="emoji-pack-empty-icon">😊</div>
-                <div className="emoji-pack-empty-heart">💕</div>
-              </div>
-              <div className="emoji-pack-empty-title">还没有表情包</div>
-              <div className="emoji-pack-empty-text">
-                在这个组里添加你的第一个表情包吧～
-              </div>
+              <div className="emoji-pack-empty-icon">😊</div>
+              <div className="emoji-pack-empty-text">还没有表情包</div>
               <button
                 type="button"
                 className="emoji-pack-empty-btn"
                 onClick={() => setAddingEmoji(true)}
               >
-                <span className="emoji-pack-empty-btn-icon">＋</span>
-                <span>添加表情包</span>
+                添加表情包
               </button>
             </div>
           ) : (
@@ -142,39 +137,31 @@ export function EmojiPackPage() {
               {selectedGroup.emojis.map((emoji) => (
                 <div key={emoji.id} className="emoji-pack-item">
                   <div className="emoji-pack-item-preview">
-                    <img
-                      src={emoji.url}
-                      alt={emoji.name}
-                      className="emoji-pack-item-img"
-                    />
+                    {emoji.type === "gif" ? (
+                      <img
+                        src={emoji.url}
+                        alt={emoji.name}
+                        className="emoji-pack-item-img"
+                      />
+                    ) : (
+                      <img
+                        src={emoji.url}
+                        alt={emoji.name}
+                        className="emoji-pack-item-img"
+                      />
+                    )}
                     {emoji.type === "gif" && (
                       <div className="emoji-pack-item-badge">GIF</div>
                     )}
-                    <button
-                      type="button"
-                      className="emoji-pack-item-delete"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeEmoji(selectedGroup.id, emoji.id);
-                      }}
-                    >
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        xmlns="http://www.w3.org/2000/svg"
-                      >
-                        <path
-                          d="M18 6L6 18M6 6L18 18"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                        />
-                      </svg>
-                    </button>
                   </div>
                   <div className="emoji-pack-item-name">{emoji.name}</div>
+                  <button
+                    type="button"
+                    className="emoji-pack-item-delete"
+                    onClick={() => removeEmoji(selectedGroup.id, emoji.id)}
+                  >
+                    ×
+                  </button>
                 </div>
               ))}
             </div>
@@ -271,38 +258,43 @@ export function EmojiPackPage() {
 
   return (
     <div className="emoji-pack-page">
-      <div className="emoji-pack-header">
-        <div className="emoji-pack-title">表情包</div>
+      <div className="emoji-pack-header emoji-pack-header-decorated">
+        <div className="emoji-pack-title-wrapper">
+          <div className="emoji-pack-title-icon">😊</div>
+          <div className="emoji-pack-title">表情包</div>
+        </div>
         {userProfile.emojiGroups.length > 0 && (
           <button
             type="button"
-            className="emoji-pack-add-btn"
+            className="emoji-pack-add-btn emoji-pack-add-btn-styled"
             onClick={() => setCreatingGroup(true)}
           >
-            ＋
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 5V19M5 12H19" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/>
+            </svg>
           </button>
         )}
       </div>
 
       <div className="emoji-pack-content">
         {userProfile.emojiGroups.length === 0 ? (
-          <div className="emoji-pack-empty">
+          <div className="emoji-pack-empty emoji-pack-empty-decorated">
             <div className="emoji-pack-empty-decoration">
-              <div className="emoji-pack-empty-star">✨</div>
               <div className="emoji-pack-empty-icon">😊</div>
-              <div className="emoji-pack-empty-heart">💕</div>
+              <div className="emoji-pack-empty-sparkles">
+                <span className="sparkle sparkle-1">✨</span>
+                <span className="sparkle sparkle-2">💫</span>
+                <span className="sparkle sparkle-3">⭐</span>
+              </div>
             </div>
-            <div className="emoji-pack-empty-title">还没有表情包组</div>
-            <div className="emoji-pack-empty-text">
-              创建你的第一个表情包组<br />
-              开始收集可爱的表情吧～
-            </div>
+            <div className="emoji-pack-empty-text">还没有表情包组</div>
+            <div className="emoji-pack-empty-subtext">创建你的第一个表情包组，开始收集可爱的表情吧～</div>
             <button
               type="button"
-              className="emoji-pack-empty-btn"
+              className="emoji-pack-empty-btn emoji-pack-empty-btn-styled"
               onClick={() => setCreatingGroup(true)}
             >
-              <span className="emoji-pack-empty-btn-icon">＋</span>
+              <span className="btn-icon">＋</span>
               <span>新建表情包组</span>
             </button>
           </div>
@@ -311,7 +303,7 @@ export function EmojiPackPage() {
             {userProfile.emojiGroups.map((group) => (
               <div
                 key={group.id}
-                className="emoji-pack-group-item"
+                className="emoji-pack-group-item emoji-pack-group-item-decorated"
                 onClick={() => {
                   setSelectedGroupId(group.id);
                   setMode("group");
@@ -326,42 +318,20 @@ export function EmojiPackPage() {
                         className="emoji-pack-group-icon-img"
                       />
                     ) : (
-                      <div className="emoji-pack-group-icon-placeholder">
-                        <span>📦</span>
-                      </div>
+                      <span className="emoji-pack-group-icon-emoji">📦</span>
                     )}
                   </div>
                   {group.emojis.length > 0 && (
-                    <div className="emoji-pack-group-badge">
-                      {group.emojis.length}
-                    </div>
+                    <div className="emoji-pack-group-badge">{group.emojis.length}</div>
                   )}
                 </div>
                 <div className="emoji-pack-group-info">
                   <div className="emoji-pack-group-name">{group.name}</div>
                   <div className="emoji-pack-group-count">
-                    {group.emojis.length === 0
-                      ? "还没有表情包"
-                      : `${group.emojis.length} 个表情包`}
+                    {group.emojis.length} 个表情包
                   </div>
                 </div>
-                <div className="emoji-pack-group-arrow">
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    xmlns="http://www.w3.org/2000/svg"
-                  >
-                    <path
-                      d="M9 18L15 12L9 6"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </div>
+                <div className="emoji-pack-group-arrow">›</div>
               </div>
             ))}
           </div>
