@@ -19,6 +19,12 @@ interface UiMessage {
   voiceDuration?: number;
   /** 语音文本内容 */
   voiceText?: string;
+  /** 是否为表情包消息 */
+  isEmoji?: boolean;
+  /** 表情包图片URL */
+  emojiUrl?: string;
+  /** 表情包名称 */
+  emojiName?: string;
 }
 
 const CHAT_STORAGE_PREFIX = "miniOtomeChat_";
@@ -79,8 +85,86 @@ function formatChatTimeLabel(timestamp: number, now: Date): string {
   return `${weekday} ${hm}`;
 }
 
+/**
+ * 根据文本内容匹配最合适的表情包
+ * @param text AI回复的文本内容
+ * @param allEmojis 所有可用的表情包列表
+ * @returns 匹配到的表情包，如果没有合适的则返回null
+ */
+function findMatchingEmoji(
+  text: string,
+  allEmojis: Array<{ url: string; name: string }>
+): { url: string; name: string } | null {
+  if (allEmojis.length === 0) return null;
+
+  // 提取文本中的关键词（情感词、动作词等）
+  const keywords: string[] = [];
+
+  // 情感关键词
+  const emotionKeywords = [
+    "开心", "高兴", "快乐", "愉快", "兴奋", "喜悦", "欢乐", "笑", "哈哈", "嘻嘻", "嘿嘿",
+    "难过", "伤心", "悲伤", "哭", "流泪", "哭泣", "委屈", "失落",
+    "生气", "愤怒", "气", "怒", "火",
+    "惊讶", "吃惊", "震惊", "哇", "天哪",
+    "害羞", "脸红", "不好意思", "尴尬",
+    "困", "累", "疲惫", "睡觉", "晚安",
+    "饿", "吃", "美食", "好吃",
+    "爱", "喜欢", "心动", "心动", "❤", "💕",
+    "拜拜", "再见", "bye", "88",
+    "好", "棒", "赞", "厉害", "牛",
+    "加油", "努力", "奋斗",
+    "谢谢", "感谢", "thx",
+    "对不起", "抱歉", "sorry"
+  ];
+
+  // 检查文本中是否包含关键词
+  for (const keyword of emotionKeywords) {
+    if (text.includes(keyword)) {
+      keywords.push(keyword);
+    }
+  }
+
+  // 如果没有找到关键词，不发送表情包
+  if (keywords.length === 0) {
+    return null;
+  }
+
+  // 根据关键词匹配表情包名称
+  // 优先匹配完全包含关键词的表情包名称
+  for (const keyword of keywords) {
+    const matched = allEmojis.find(emoji =>
+      emoji.name.includes(keyword) || keyword.includes(emoji.name)
+    );
+    if (matched) {
+      return matched;
+    }
+  }
+
+  // 如果完全匹配失败，尝试部分匹配（表情包名称包含关键词的一部分）
+  for (const keyword of keywords) {
+    const matched = allEmojis.find(emoji => {
+      // 检查表情包名称是否包含关键词的任意部分
+      for (let i = 0; i < keyword.length; i++) {
+        for (let j = i + 1; j <= keyword.length; j++) {
+          const subKeyword = keyword.slice(i, j);
+          if (subKeyword.length >= 1 && emoji.name.includes(subKeyword)) {
+            return true;
+          }
+        }
+      }
+      return false;
+    });
+    if (matched) {
+      return matched;
+    }
+  }
+
+  // 如果还是没找到，不发送表情包
+  return null;
+}
+
 export function WeChatScreen() {
-  const { aiConfig, chatProfiles, updateChatProfile } = useSettings();
+  const { aiConfig, chatProfiles, updateChatProfile, userProfile } = useSettings();
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [tab, setTab] = useState<WechatTab>("chats");
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
@@ -88,6 +172,8 @@ export function WeChatScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<"main" | "profile">("main");
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const [selectedEmojiGroupId, setSelectedEmojiGroupId] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   // 回车可以连续发多条消息：这些消息只入队，不触发 AI；点击按钮才触发回复
   const [pendingUserTurns, setPendingUserTurns] = useState<UiMessage[]>([]);
@@ -101,7 +187,7 @@ export function WeChatScreen() {
   const [voiceTypedIds, setVoiceTypedIds] = useState<Set<number>>(new Set());
   const [voiceTypingText, setVoiceTypingText] = useState<Record<number, string>>({});
 
-  const createUserMessage = (text: string): UiMessage => {
+  const createUserMessage = (text: string, emojiUrl?: string, emojiName?: string): UiMessage => {
     const now = new Date();
     const timestamp = now.getTime();
     const timeLabel = `${now.getHours().toString().padStart(2, "0")}:${now
@@ -109,6 +195,9 @@ export function WeChatScreen() {
       .toString()
       .padStart(2, "0")}`;
     const nextId = messages.length ? messages[messages.length - 1].id + 1 : 1;
+    if (emojiUrl) {
+      return { id: nextId, from: "me", text: "", timeLabel, timestamp, isEmoji: true, emojiUrl, emojiName };
+    }
     return { id: nextId, from: "me", text, timeLabel, timestamp };
   };
 
@@ -253,11 +342,21 @@ export function WeChatScreen() {
           .toString()
           .padStart(2, "0")}`;
 
+        // 根据文本内容匹配合适的表情包
+        const allEmojis: Array<{ url: string; name: string }> = [];
+        userProfile.emojiGroups.forEach((group: { emojis: Array<{ url: string; name: string }> }) => {
+          group.emojis.forEach((emoji: { url: string; name: string }) => {
+            allEmojis.push({ url: emoji.url, name: emoji.name });
+          });
+        });
+        const selectedEmoji = findMatchingEmoji(text, allEmojis);
+        const shouldSendEmoji = selectedEmoji !== null;
+
         // 随机决定是否发送语音消息（可调整概率，当前为 50%）
         // 如果想总是发送语音消息，改为: Math.random() < 1.0
         // 如果想从不发送语音消息，改为: Math.random() < 0.0
         const VOICE_PROBABILITY = 0.5; // 调整这个值：0.0 = 从不发送，1.0 = 总是发送
-        const isVoice = Math.random() < VOICE_PROBABILITY && text.length > 10;
+        const isVoice = !shouldSendEmoji && Math.random() < VOICE_PROBABILITY && text.length > 10;
 
         // 如果是语音消息，需要提取或生成只包含声音描述的内容（不含心理活动）
         let voiceText = text;
@@ -308,12 +407,15 @@ export function WeChatScreen() {
               {
                 id: nextId,
                 from: "other",
-                text: isVoice ? "" : text,
+                text: isVoice ? "" : shouldSendEmoji ? "" : text,
                 timeLabel: label,
                 timestamp: ts,
                 isVoice,
                 voiceDuration,
-                voiceText: isVoice ? voiceText : undefined
+                voiceText: isVoice ? voiceText : undefined,
+                isEmoji: shouldSendEmoji,
+                emojiUrl: shouldSendEmoji ? selectedEmoji?.url : undefined,
+                emojiName: shouldSendEmoji ? selectedEmoji?.name : undefined
               }
             ];
           });
@@ -326,9 +428,18 @@ export function WeChatScreen() {
           );
           const existing = stored ? (JSON.parse(stored) as UiMessage[]) : [];
 
-          // 使用相同的语音判断逻辑
+          // 使用相同的表情包和语音判断逻辑
+          const allEmojis: Array<{ url: string; name: string }> = [];
+          userProfile.emojiGroups.forEach((group: { emojis: Array<{ url: string; name: string }> }) => {
+            group.emojis.forEach((emoji: { url: string; name: string }) => {
+              allEmojis.push({ url: emoji.url, name: emoji.name });
+            });
+          });
+          const selectedEmoji = findMatchingEmoji(text, allEmojis);
+          const shouldSendEmoji = selectedEmoji !== null;
+
           const VOICE_PROBABILITY = 0.5; // 调整这个值：0.0 = 从不发送，1.0 = 总是发送
-          const isVoice = Math.random() < VOICE_PROBABILITY && text.length > 10;
+          const isVoice = !shouldSendEmoji && Math.random() < VOICE_PROBABILITY && text.length > 10;
 
           // 如果是语音消息，需要提取或生成只包含声音描述的内容（不含心理活动）
           let voiceText = text;
@@ -372,12 +483,15 @@ export function WeChatScreen() {
           const newMessage: UiMessage = {
             id: existing.length ? existing[existing.length - 1].id + 1 : 1,
             from: "other",
-            text: isVoice ? "" : text,
+            text: isVoice ? "" : shouldSendEmoji ? "" : text,
             timeLabel: label,
             timestamp: ts,
             isVoice,
             voiceDuration,
-            voiceText: isVoice ? voiceText : undefined
+            voiceText: isVoice ? voiceText : undefined,
+            isEmoji: shouldSendEmoji,
+            emojiUrl: shouldSendEmoji ? selectedEmoji?.url : undefined,
+            emojiName: shouldSendEmoji ? selectedEmoji?.name : undefined
           };
           window.localStorage.setItem(
             `${CHAT_STORAGE_PREFIX}${targetChatId}`,
@@ -894,108 +1008,130 @@ export function WeChatScreen() {
                     )}
                   </div>
                 )}
-                <div
-                  className={`chat-bubble chat-bubble-${m.from === "me" ? "me" : "other"
-                    }`}
-                >
-                  {m.isVoice ? (
+                {m.isEmoji ? (
+                  <div className="chat-emoji-wrapper">
+                    <img
+                      src={m.emojiUrl}
+                      alt={m.emojiName || "表情包"}
+                      className="chat-emoji-img"
+                    />
+                  </div>
+                ) : (
+                  <>
                     <div
-                      className="chat-voice-bubble"
-                      onClick={() => {
-                        const isExpanding = expandedVoiceId !== m.id;
-                        setExpandedVoiceId(
-                          expandedVoiceId === m.id ? null : m.id
-                        );
-
-                        // 如果是首次展开，启动打字机效果
-                        if (isExpanding && m.voiceText && !voiceTypedIds.has(m.id)) {
-                          const fullText = m.voiceText;
-                          setVoiceTypingText((prev) => ({ ...prev, [m.id]: "" }));
-                          let currentIndex = 0;
-                          const typeInterval = setInterval(() => {
-                            if (currentIndex < fullText.length) {
-                              setVoiceTypingText((prev) => ({
-                                ...prev,
-                                [m.id]: fullText.slice(0, currentIndex + 1)
-                              }));
-                              currentIndex++;
-                            } else {
-                              clearInterval(typeInterval);
-                              setVoiceTypedIds((prev) => new Set(prev).add(m.id));
-                              setVoiceTypingText((prev) => {
-                                const next = { ...prev };
-                                delete next[m.id];
-                                return next;
-                              });
-                            }
-                          }, 30); // 每30ms打一个字
-                        }
-                      }}
+                      className={`chat-bubble chat-bubble-${m.from === "me" ? "me" : "other"
+                        }`}
                     >
-                      {m.from === "other" ? (
-                        <>
-                          <div className="chat-voice-duration">
-                            {m.voiceDuration
-                              ? `${Math.floor(m.voiceDuration / 60)}:${String(
-                                m.voiceDuration % 60
-                              ).padStart(2, "0")}`
-                              : "0:00"}
-                          </div>
-                          <div className={`chat-voice-wifi chat-voice-wifi-${m.from}`}>
-                            <svg
-                              width="20"
-                              height="20"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              xmlns="http://www.w3.org/2000/svg"
-                            >
-                              <path
-                                d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.07 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"
-                                fill="currentColor"
-                              />
-                            </svg>
-                          </div>
-                        </>
+                      {m.isVoice ? (
+                        <div
+                          className="chat-voice-bubble"
+                          onClick={() => {
+                            const isExpanding = expandedVoiceId !== m.id;
+                            setExpandedVoiceId(
+                              expandedVoiceId === m.id ? null : m.id
+                            );
+
+                            // 如果是首次展开，启动打字机效果
+                            if (isExpanding && m.voiceText && !voiceTypedIds.has(m.id)) {
+                              const fullText = m.voiceText;
+                              setVoiceTypingText((prev) => ({ ...prev, [m.id]: "" }));
+                              let currentIndex = 0;
+                              const typeInterval = setInterval(() => {
+                                if (currentIndex < fullText.length) {
+                                  setVoiceTypingText((prev) => ({
+                                    ...prev,
+                                    [m.id]: fullText.slice(0, currentIndex + 1)
+                                  }));
+                                  currentIndex++;
+                                } else {
+                                  clearInterval(typeInterval);
+                                  setVoiceTypedIds((prev) => new Set(prev).add(m.id));
+                                  setVoiceTypingText((prev) => {
+                                    const next = { ...prev };
+                                    delete next[m.id];
+                                    return next;
+                                  });
+                                }
+                              }, 30); // 每30ms打一个字
+                            }
+                          }}
+                        >
+                          {m.from === "other" ? (
+                            <>
+                              <div className="chat-voice-duration">
+                                {m.voiceDuration
+                                  ? `${Math.floor(m.voiceDuration / 60)}:${String(
+                                    m.voiceDuration % 60
+                                  ).padStart(2, "0")}`
+                                  : "0:00"}
+                              </div>
+                              <div className={`chat-voice-wifi chat-voice-wifi-${m.from}`}>
+                                <svg
+                                  width="20"
+                                  height="20"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  xmlns="http://www.w3.org/2000/svg"
+                                >
+                                  <path
+                                    d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.07 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"
+                                    fill="currentColor"
+                                  />
+                                </svg>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div className={`chat-voice-wifi chat-voice-wifi-${m.from}`}>
+                                <svg
+                                  width="20"
+                                  height="20"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  xmlns="http://www.w3.org/2000/svg"
+                                >
+                                  <path
+                                    d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.07 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"
+                                    fill="currentColor"
+                                  />
+                                </svg>
+                              </div>
+                              <div className="chat-voice-duration">
+                                {m.voiceDuration
+                                  ? `${Math.floor(m.voiceDuration / 60)}:${String(
+                                    m.voiceDuration % 60
+                                  ).padStart(2, "0")}`
+                                  : "0:00"}
+                              </div>
+                            </>
+                          )}
+                        </div>
                       ) : (
-                        <>
-                          <div className={`chat-voice-wifi chat-voice-wifi-${m.from}`}>
-                            <svg
-                              width="20"
-                              height="20"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              xmlns="http://www.w3.org/2000/svg"
-                            >
-                              <path
-                                d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.07 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"
-                                fill="currentColor"
-                              />
-                            </svg>
-                          </div>
-                          <div className="chat-voice-duration">
-                            {m.voiceDuration
-                              ? `${Math.floor(m.voiceDuration / 60)}:${String(
-                                m.voiceDuration % 60
-                              ).padStart(2, "0")}`
-                              : "0:00"}
-                          </div>
-                        </>
+                        <div className="chat-bubble-text">{m.text}</div>
+                      )}
+                      {m.isVoice && expandedVoiceId === m.id && m.voiceText && (
+                        <div className="chat-voice-text-expanded">
+                          {voiceTypingText[m.id] !== undefined
+                            ? voiceTypingText[m.id]
+                            : m.voiceText}
+                        </div>
                       )}
                     </div>
-                  ) : (
-                    <div className="chat-bubble-text">{m.text}</div>
-                  )}
-                  {m.isVoice && expandedVoiceId === m.id && m.voiceText && (
-                    <div className="chat-voice-text-expanded">
-                      {voiceTypingText[m.id] !== undefined
-                        ? voiceTypingText[m.id]
-                        : m.voiceText}
-                    </div>
-                  )}
-                </div>
+                  </>
+                )}
                 {m.from === "me" && (
                   <div className="chat-avatar chat-avatar-me">
-                    <span aria-hidden="true">我</span>
+                    {userProfile?.avatarUrl ? (
+                      <img
+                        src={userProfile.avatarUrl}
+                        alt="我的头像"
+                        className="chat-avatar-img"
+                      />
+                    ) : (
+                      <span aria-hidden="true">
+                        {userProfile?.avatarEmoji || "我"}
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
@@ -1074,52 +1210,68 @@ export function WeChatScreen() {
       : null;
 
   const headerTitle =
-    tab === "me" ? "我" :
+    tab === "me" ? "表情包" :
       (activeProfile && (mode === "profile" || (tab === "chats" && activeChatId))) ?
         (activeProfile.remark || "未命名好友") :
         "微信 · 软糯糯";
 
   return (
     <div className="screen wechat-screen">
-      <header className="screen-header wechat-header">
-        <div className="wechat-header-left">
-          {tab === "chats" && activeChatId && mode === "main" ? (
+      {tab !== "me" && (
+        <header className="screen-header wechat-header">
+          <div className="wechat-header-left">
+            {tab === "chats" && activeChatId && mode === "main" ? (
+              <button
+                type="button"
+                className="wechat-back-btn"
+                onClick={() => {
+                  setActiveChatId(null);
+                  setMode("main");
+                }}
+              >
+                ←
+              </button>
+            ) : (
+              <div className="wechat-header-spacer" />
+            )}
+          </div>
+          <div className="wechat-header-title">
+            <div className="screen-title-main">{headerTitle}</div>
+          </div>
+          {mode === "main" && activeChatId && (
+            <div className="wechat-header-right">
+              <button
+                type="button"
+                className="wechat-call-btn"
+                onClick={() => {
+                  // TODO: 实现语音通话功能
+                }}
+                title="语音通话"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z" fill="currentColor" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className="wechat-profile-btn"
+                onClick={() => setMode("profile")}
+              >
+                ⋯
+              </button>
+            </div>
+          )}
+          {mode === "profile" && (
             <button
               type="button"
-              className="wechat-back-btn"
-              onClick={() => {
-                setActiveChatId(null);
-                setMode("main");
-              }}
+              className="wechat-profile-btn"
+              onClick={() => setMode("main")}
             >
               ←
             </button>
-          ) : (
-            <div className="wechat-header-spacer" />
           )}
-        </div>
-        <div className="wechat-header-title">
-          <div className="screen-title-main">{headerTitle}</div>
-        </div>
-        {mode === "main" && activeChatId && (
-          <button
-            type="button"
-            className="wechat-profile-btn"
-            onClick={() => setMode("profile")}
-          >
-            ⋯
-          </button>
-        )}
-        {mode === "profile" && (
-          <button
-            type="button"
-            className="wechat-profile-btn"
-            onClick={() => setMode("main")}
-          >
-            ←
-          </button>
-        )}
-      </header>
+        </header>
+      )}
       <main className="screen-body wechat-body">
         {mode === "profile" && activeChatId ? (
           <ChatProfilePage
@@ -1244,20 +1396,49 @@ export function WeChatScreen() {
                   className="chat-menu-item"
                   onClick={() => {
                     setMenuOpen(false);
-                    // TODO: 实现发送图片功能
+                    setEmojiPickerOpen(true);
                   }}
                 >
-                  📷 照片
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="none" />
+                    <circle cx="8.5" cy="9.5" r="1.5" fill="currentColor" />
+                    <circle cx="15.5" cy="9.5" r="1.5" fill="currentColor" />
+                    <path d="M8 14c0 2 1.5 3 4 3s4-1 4-3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none" />
+                  </svg>
+                  <span>表情包</span>
                 </button>
                 <button
                   type="button"
                   className="chat-menu-item"
                   onClick={() => {
                     setMenuOpen(false);
-                    // TODO: 实现发送文件功能
+                    // TODO: 实现发送图片功能
                   }}
                 >
-                  📎 文件
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" strokeWidth="2" fill="none" />
+                    <circle cx="8.5" cy="8.5" r="1.5" fill="currentColor" />
+                    <path d="M21 15l-5-5L5 21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  <span>照片</span>
+                </button>
+                <button
+                  type="button"
+                  className="chat-menu-item"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    // TODO: 实现发送红包功能
+                  }}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    {/* 红包主体 - 竖立的矩形，底部圆角 */}
+                    <rect x="7" y="9" width="10" height="13" rx="1" stroke="currentColor" strokeWidth="2" fill="none" />
+                    {/* 红包顶部三角形翻盖 - 填充的实心三角形 */}
+                    <path d="M6 9L12 4L18 9L17 9L12 5L7 9Z" fill="currentColor" />
+                    {/* 翻盖的轮廓线 */}
+                    <path d="M6 9L12 4L18 9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                  </svg>
+                  <span>红包</span>
                 </button>
                 <button
                   type="button"
@@ -1267,7 +1448,10 @@ export function WeChatScreen() {
                     // TODO: 实现发送位置功能
                   }}
                 >
-                  📍 位置
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="currentColor" />
+                  </svg>
+                  <span>位置</span>
                 </button>
               </div>
             )}
@@ -1374,6 +1558,139 @@ export function WeChatScreen() {
           </div>
         </div>
       )}
+      {emojiPickerOpen && (
+        <div
+          className="settings-modal-backdrop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setEmojiPickerOpen(false);
+              setSelectedEmojiGroupId(null);
+            }
+          }}
+        >
+          <div
+            className="settings-modal-card emoji-picker-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="emoji-picker-header">
+              <div className="emoji-picker-title">选择表情包</div>
+              <button
+                type="button"
+                className="emoji-picker-close"
+                onClick={() => {
+                  setEmojiPickerOpen(false);
+                  setSelectedEmojiGroupId(null);
+                }}
+              >
+                ✕
+              </button>
+            </div>
+            <div className="emoji-picker-content">
+              {userProfile.emojiGroups.length === 0 ? (
+                <div className="emoji-picker-empty">
+                  <div className="emoji-picker-empty-text">还没有表情包组</div>
+                  <div className="emoji-picker-empty-hint">请先在"我"页面添加表情包</div>
+                </div>
+              ) : (
+                <>
+                  {/* 表情包组横向滚动列表 */}
+                  <div className="emoji-picker-group-tabs">
+                    <div className="emoji-picker-group-tabs-scroll">
+                      {userProfile.emojiGroups.map((group: { id: string; name: string; emojis: Array<{ id: string; url: string; name: string }> }) => {
+                        const firstEmoji = group.emojis[0];
+                        const currentGroupId = selectedEmojiGroupId || (userProfile.emojiGroups[0]?.id ?? null);
+                        const isActive = currentGroupId === group.id;
+
+                        return (
+                          <button
+                            key={group.id}
+                            type="button"
+                            className={`emoji-picker-group-tab ${isActive ? "emoji-picker-group-tab-active" : ""}`}
+                            onClick={() => setSelectedEmojiGroupId(group.id)}
+                          >
+                            {firstEmoji ? (
+                              <img
+                                src={firstEmoji.url}
+                                alt={group.name}
+                                className="emoji-picker-group-tab-icon"
+                              />
+                            ) : (
+                              <div className="emoji-picker-group-tab-icon-empty">{group.name[0] || "?"}</div>
+                            )}
+                            <span className="emoji-picker-group-tab-name">{group.name}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* 选中组的表情包容器 */}
+                  {(() => {
+                    const currentGroupId = selectedEmojiGroupId || (userProfile.emojiGroups[0]?.id ?? null);
+                    const selectedGroup = currentGroupId
+                      ? userProfile.emojiGroups.find((g: { id: string }) => g.id === currentGroupId)
+                      : null;
+
+                    if (!selectedGroup) return null;
+
+                    return (
+                      <div className="emoji-picker-emojis-container">
+                        {selectedGroup.emojis.length === 0 ? (
+                          <div className="emoji-picker-group-empty">该组暂无表情包</div>
+                        ) : (
+                          <div className="emoji-picker-grid">
+                            {selectedGroup.emojis.map((emoji: { id: string; url: string; name: string; type?: string }) => (
+                              <button
+                                key={emoji.id}
+                                type="button"
+                                className="emoji-picker-item"
+                                onClick={() => {
+                                  const emojiMsg = createUserMessage("", emoji.url, emoji.name);
+                                  pushUserMessage(emojiMsg);
+
+                                  // 保存到 localStorage
+                                  if (activeChatId) {
+                                    try {
+                                      const stored = window.localStorage.getItem(
+                                        `${CHAT_STORAGE_PREFIX}${activeChatId}`
+                                      );
+                                      const existing = stored ? (JSON.parse(stored) as UiMessage[]) : [];
+                                      const nextId = existing.length ? existing[existing.length - 1].id + 1 : 1;
+                                      const savedMsg: UiMessage = {
+                                        ...emojiMsg,
+                                        id: nextId
+                                      };
+                                      window.localStorage.setItem(
+                                        `${CHAT_STORAGE_PREFIX}${activeChatId}`,
+                                        JSON.stringify([...existing, savedMsg])
+                                      );
+                                    } catch {
+                                      // ignore
+                                    }
+                                  }
+
+                                  setEmojiPickerOpen(false);
+                                  setSelectedEmojiGroupId(null);
+                                }}
+                              >
+                                <img
+                                  src={emoji.url}
+                                  alt={emoji.name}
+                                  className="emoji-picker-img"
+                                />
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {mode === "main" && !(tab === "chats" && activeChatId) && (
         <nav className="wechat-bottom-nav">
           <button
@@ -1384,7 +1701,24 @@ export function WeChatScreen() {
               setActiveChatId(null);
             }}
           >
-            <span className="wechat-bottom-icon">💬</span>
+            <span className="wechat-bottom-icon">
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M20 2H4C2.9 2 2 2.9 2 4V22L6 18H20C21.1 18 22 17.1 22 16V4C22 2.9 21.1 2 20 2Z"
+                  fill="currentColor"
+                />
+                <path
+                  d="M7 9H17V11H7V9ZM7 12H14V14H7V12Z"
+                  fill="white"
+                />
+              </svg>
+            </span>
             <span className="wechat-bottom-label">微信</span>
           </button>
           <button
@@ -1395,7 +1729,20 @@ export function WeChatScreen() {
               setActiveChatId(null);
             }}
           >
-            <span className="wechat-bottom-icon">✦</span>
+            <span className="wechat-bottom-icon">
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"
+                  fill="currentColor"
+                />
+              </svg>
+            </span>
             <span className="wechat-bottom-label">发现</span>
           </button>
           <button
@@ -1406,7 +1753,20 @@ export function WeChatScreen() {
               setActiveChatId(null);
             }}
           >
-            <span className="wechat-bottom-icon">♡</span>
+            <span className="wechat-bottom-icon">
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M12 21.35L10.55 20.03C5.4 15.36 2 12.28 2 8.5C2 5.42 4.42 3 7.5 3C9.24 3 10.91 3.81 12 5.09C13.09 3.81 14.76 3 16.5 3C19.58 3 22 5.42 22 8.5C22 12.28 18.6 15.36 13.45 20.04L12 21.35Z"
+                  fill="currentColor"
+                />
+              </svg>
+            </span>
             <span className="wechat-bottom-label">我</span>
           </button>
         </nav>

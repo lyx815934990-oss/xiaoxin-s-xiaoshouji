@@ -50,6 +50,7 @@ interface SettingsState {
   aiConfig: AiConfig;
   worldbookEntries: WorldbookEntry[];
   chatProfiles: Record<string, ChatProfile>;
+  userProfile: UserProfile;
 }
 
 interface SettingsContextValue extends SettingsState {
@@ -286,6 +287,81 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         setState((prev) => ({
           ...prev,
           userProfile: { ...prev.userProfile, ...patch }
+        })),
+      addEmojiGroup: (name) => {
+        const id = genId();
+        setState((prev) => ({
+          ...prev,
+          userProfile: {
+            ...prev.userProfile,
+            emojiGroups: [
+              ...prev.userProfile.emojiGroups,
+              { id, name, emojis: [] }
+            ]
+          }
+        }));
+        return id;
+      },
+      updateEmojiGroup: (groupId, patch) =>
+        setState((prev) => ({
+          ...prev,
+          userProfile: {
+            ...prev.userProfile,
+            emojiGroups: prev.userProfile.emojiGroups.map((g) =>
+              g.id === groupId ? { ...g, ...patch } : g
+            )
+          }
+        })),
+      removeEmojiGroup: (groupId) =>
+        setState((prev) => ({
+          ...prev,
+          userProfile: {
+            ...prev.userProfile,
+            emojiGroups: prev.userProfile.emojiGroups.filter((g) => g.id !== groupId)
+          }
+        })),
+      addEmoji: (groupId, emoji) => {
+        const id = genId();
+        setState((prev) => ({
+          ...prev,
+          userProfile: {
+            ...prev.userProfile,
+            emojiGroups: prev.userProfile.emojiGroups.map((g) =>
+              g.id === groupId
+                ? { ...g, emojis: [...g.emojis, { ...emoji, id }] }
+                : g
+            )
+          }
+        }));
+      },
+      updateEmoji: (groupId, emojiId, patch) =>
+        setState((prev) => ({
+          ...prev,
+          userProfile: {
+            ...prev.userProfile,
+            emojiGroups: prev.userProfile.emojiGroups.map((g) =>
+              g.id === groupId
+                ? {
+                    ...g,
+                    emojis: g.emojis.map((e) =>
+                      e.id === emojiId ? { ...e, ...patch } : e
+                    )
+                  }
+                : g
+            )
+          }
+        })),
+      removeEmoji: (groupId, emojiId) =>
+        setState((prev) => ({
+          ...prev,
+          userProfile: {
+            ...prev.userProfile,
+            emojiGroups: prev.userProfile.emojiGroups.map((g) =>
+              g.id === groupId
+                ? { ...g, emojis: g.emojis.filter((e) => e.id !== emojiId) }
+                : g
+            )
+          }
         }))
     };
   }, [state]);

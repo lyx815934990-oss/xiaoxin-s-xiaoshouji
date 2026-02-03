@@ -3,7 +3,11 @@ import { useSettings } from "../../context/SettingsContext";
 
 type PageMode = "list" | "group" | "addEmoji";
 
-export function EmojiPackPage() {
+interface EmojiPackPageProps {
+  onBack?: () => void;
+}
+
+export function EmojiPackPage({ onBack }: EmojiPackPageProps) {
   const {
     userProfile,
     addEmojiGroup,
@@ -96,40 +100,43 @@ export function EmojiPackPage() {
     return (
       <div className="emoji-pack-page">
         <div className="emoji-pack-header emoji-pack-header-decorated">
-          <button
-            type="button"
-            className="emoji-pack-back-btn"
-            onClick={() => {
-              setMode("list");
-              setSelectedGroupId(null);
-            }}
-          >
-            ←
-          </button>
-          <div className="emoji-pack-title-wrapper">
-            <div className="emoji-pack-title-icon">📦</div>
-            <div className="emoji-pack-title">{selectedGroup.name}</div>
+          <div className="emoji-pack-header-spacer">
+            <button
+              type="button"
+              className="emoji-pack-back-btn"
+              onClick={() => {
+                setMode("list");
+                setSelectedGroupId(null);
+              }}
+            >
+              ←
+            </button>
           </div>
-          <button
-            type="button"
-            className="emoji-pack-add-btn"
-            onClick={() => setAddingEmoji(true)}
-          >
-            ＋
-          </button>
+          <div className="emoji-pack-title">{selectedGroup.name}</div>
+          <div className="emoji-pack-header-right">
+            <button
+              type="button"
+              className="emoji-pack-add-btn emoji-pack-add-btn-styled"
+              onClick={() => setAddingEmoji(true)}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 5V19M5 12H19" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/>
+              </svg>
+            </button>
+          </div>
         </div>
 
         <div className="emoji-pack-content">
           {selectedGroup.emojis.length === 0 ? (
             <div className="emoji-pack-empty">
-              <div className="emoji-pack-empty-icon">😊</div>
               <div className="emoji-pack-empty-text">还没有表情包</div>
               <button
                 type="button"
-                className="emoji-pack-empty-btn"
+                className="emoji-pack-empty-btn emoji-pack-empty-btn-styled"
                 onClick={() => setAddingEmoji(true)}
               >
-                添加表情包
+                <span className="btn-icon">＋</span>
+                <span>添加表情包</span>
               </button>
             </div>
           ) : (
@@ -259,34 +266,36 @@ export function EmojiPackPage() {
   return (
     <div className="emoji-pack-page">
       <div className="emoji-pack-header emoji-pack-header-decorated">
-        <div className="emoji-pack-title-wrapper">
-          <div className="emoji-pack-title-icon">😊</div>
-          <div className="emoji-pack-title">表情包</div>
+        <div className="emoji-pack-header-spacer">
+          {onBack && (
+            <button
+              type="button"
+              className="emoji-pack-back-btn"
+              onClick={onBack}
+            >
+              ←
+            </button>
+          )}
         </div>
-        {userProfile.emojiGroups.length > 0 && (
-          <button
-            type="button"
-            className="emoji-pack-add-btn emoji-pack-add-btn-styled"
-            onClick={() => setCreatingGroup(true)}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 5V19M5 12H19" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/>
-            </svg>
-          </button>
-        )}
+        <div className="emoji-pack-title">表情包</div>
+        <div className="emoji-pack-header-right">
+          {userProfile.emojiGroups.length > 0 && (
+            <button
+              type="button"
+              className="emoji-pack-add-btn emoji-pack-add-btn-styled"
+              onClick={() => setCreatingGroup(true)}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 5V19M5 12H19" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/>
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="emoji-pack-content">
         {userProfile.emojiGroups.length === 0 ? (
           <div className="emoji-pack-empty emoji-pack-empty-decorated">
-            <div className="emoji-pack-empty-decoration">
-              <div className="emoji-pack-empty-icon">😊</div>
-              <div className="emoji-pack-empty-sparkles">
-                <span className="sparkle sparkle-1">✨</span>
-                <span className="sparkle sparkle-2">💫</span>
-                <span className="sparkle sparkle-3">⭐</span>
-              </div>
-            </div>
             <div className="emoji-pack-empty-text">还没有表情包组</div>
             <div className="emoji-pack-empty-subtext">创建你的第一个表情包组，开始收集可爱的表情吧～</div>
             <button
@@ -303,35 +312,94 @@ export function EmojiPackPage() {
             {userProfile.emojiGroups.map((group) => (
               <div
                 key={group.id}
-                className="emoji-pack-group-item emoji-pack-group-item-decorated"
-                onClick={() => {
-                  setSelectedGroupId(group.id);
-                  setMode("group");
-                }}
+                className="emoji-pack-group-card"
               >
-                <div className="emoji-pack-group-icon-wrapper">
-                  <div className="emoji-pack-group-icon">
+                <div
+                  className="emoji-pack-group-card-main"
+                  onClick={() => {
+                    setSelectedGroupId(group.id);
+                    setMode("group");
+                  }}
+                >
+                  <div className="emoji-pack-group-preview">
                     {group.emojis.length > 0 ? (
-                      <img
-                        src={group.emojis[0].url}
-                        alt={group.name}
-                        className="emoji-pack-group-icon-img"
-                      />
+                      <div className="emoji-pack-group-preview-grid">
+                        {group.emojis.slice(0, 4).map((emoji, idx) => (
+                          <div key={emoji.id} className="emoji-pack-group-preview-item">
+                            <img
+                              src={emoji.url}
+                              alt={emoji.name}
+                              className="emoji-pack-group-preview-img"
+                            />
+                            {emoji.type === "gif" && (
+                              <div className="emoji-pack-group-preview-badge">GIF</div>
+                            )}
+                          </div>
+                        ))}
+                        {group.emojis.length > 4 && (
+                          <div className="emoji-pack-group-preview-more">
+                            +{group.emojis.length - 4}
+                          </div>
+                        )}
+                      </div>
                     ) : (
-                      <span className="emoji-pack-group-icon-emoji">📦</span>
+                      <div className="emoji-pack-group-preview-empty">
+                        <span className="emoji-pack-group-preview-empty-icon">📦</span>
+                        <span className="emoji-pack-group-preview-empty-text">暂无表情</span>
+                      </div>
                     )}
                   </div>
-                  {group.emojis.length > 0 && (
-                    <div className="emoji-pack-group-badge">{group.emojis.length}</div>
-                  )}
-                </div>
-                <div className="emoji-pack-group-info">
-                  <div className="emoji-pack-group-name">{group.name}</div>
-                  <div className="emoji-pack-group-count">
-                    {group.emojis.length} 个表情包
+                  <div className="emoji-pack-group-card-info">
+                    <div className="emoji-pack-group-card-header">
+                      <div className="emoji-pack-group-card-name">{group.name}</div>
+                      {group.emojis.length > 0 && (
+                        <div className="emoji-pack-group-card-count">
+                          {group.emojis.length}
+                        </div>
+                      )}
+                    </div>
+                    <div className="emoji-pack-group-card-subtitle">
+                      {group.emojis.length > 0
+                        ? `${group.emojis.length} 个表情包`
+                        : "点击添加表情包"}
+                    </div>
+                  </div>
+                  <div className="emoji-pack-group-card-arrow">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M9 18L15 12L9 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
                   </div>
                 </div>
-                <div className="emoji-pack-group-arrow">›</div>
+                <div className="emoji-pack-group-card-actions">
+                  <button
+                    type="button"
+                    className="emoji-pack-group-action-btn emoji-pack-group-edit-btn"
+                    onClick={() => {
+                      // TODO: 实现编辑功能
+                    }}
+                    title="编辑"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M11 4H4C3.46957 4 2.96086 4.21071 2.58579 4.58579C2.21071 4.96086 2 5.46957 2 6V20C2 20.5304 2.21071 21.0391 2.58579 21.4142C2.96086 21.7893 3.46957 22 4 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M18.5 2.50023C18.8978 2.10243 19.4374 1.87891 20 1.87891C20.5626 1.87891 21.1022 2.10243 21.5 2.50023C21.8978 2.89804 22.1213 3.43762 22.1213 4.00023C22.1213 4.56284 21.8978 5.10243 21.5 5.50023L12 15.0002L8 16.0002L9 12.0002L18.5 2.50023Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    className="emoji-pack-group-action-btn emoji-pack-group-delete-btn"
+                    onClick={() => {
+                      if (confirm(`确定要删除表情包组"${group.name}"吗？`)) {
+                        removeEmojiGroup(group.id);
+                      }
+                    }}
+                    title="删除"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M3 6H5H21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M8 6V4C8 3.46957 8.21071 2.96086 8.58579 2.58579C8.96086 2.21071 9.46957 2 10 2H14C14.5304 2 15.0391 2.21071 15.4142 2.58579C15.7893 2.96086 16 3.46957 16 4V6M19 6V20C19 20.5304 18.7893 21.0391 18.4142 21.4142C18.0391 21.7893 17.5304 22 17 22H7C6.46957 22 5.96086 21.7893 5.58579 21.4142C5.21071 21.0391 5 20.5304 5 20V6H19Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
+                </div>
               </div>
             ))}
           </div>

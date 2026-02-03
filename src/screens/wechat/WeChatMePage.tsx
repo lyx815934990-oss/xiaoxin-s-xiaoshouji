@@ -23,21 +23,7 @@ export function WeChatMePage() {
 
 
   if (mode === "emojiPack") {
-    return (
-      <div className="wechat-me-page">
-        <div className="wechat-me-sub-header">
-          <button
-            type="button"
-            className="wechat-me-back-btn"
-            onClick={() => setMode("main")}
-          >
-            ←
-          </button>
-          <div className="wechat-me-sub-title">表情包</div>
-        </div>
-        <EmojiPackPage />
-      </div>
-    );
+    return <EmojiPackPage onBack={() => setMode("main")} />;
   }
 
   return (
