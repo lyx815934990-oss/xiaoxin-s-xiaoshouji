@@ -12,6 +12,12 @@ interface UiMessage {
   timeLabel?: string;
   /** 精确时间戳，用来计算与上一条消息的时间间隔 */
   timestamp?: number;
+  /** 是否为语音消息 */
+  isVoice?: boolean;
+  /** 语音时长（秒） */
+  voiceDuration?: number;
+  /** 语音文本内容 */
+  voiceText?: string;
 }
 
 const CHAT_STORAGE_PREFIX = "miniOtomeChat_";
@@ -90,6 +96,7 @@ export function WeChatScreen() {
   const [voiceText, setVoiceText] = useState("");
   const [creatingOpen, setCreatingOpen] = useState(false);
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
+  const [expandedVoiceId, setExpandedVoiceId] = useState<number | null>(null);
 
   const createUserMessage = (text: string): UiMessage => {
     const now = new Date();
@@ -515,11 +522,54 @@ export function WeChatScreen() {
   // 发送语音消息
   const sendVoiceMessage = () => {
     if (voiceText.trim()) {
-      const timeStr = recordingTime > 0
-        ? `${Math.floor(recordingTime / 60)}:${String(recordingTime % 60).padStart(2, "0")}`
-        : "0:00";
-      const message = `[语音消息 ${timeStr}] ${voiceText}`;
-      enqueueUserMessage(message);
+      const now = new Date();
+      const timestamp = now.getTime();
+      const timeLabel = `${now.getHours().toString().padStart(2, "0")}:${now
+        .getMinutes()
+        .toString()
+        .padStart(2, "0")}`;
+      
+      setMessages((prev) => {
+        const nextId = prev.length ? prev[prev.length - 1].id + 1 : 1;
+        const voiceMsg: UiMessage = {
+          id: nextId,
+          from: "me",
+          text: "", // 语音消息的 text 为空，使用 voiceText
+          timeLabel,
+          timestamp,
+          isVoice: true,
+          voiceDuration: recordingTime,
+          voiceText: voiceText.trim()
+        };
+        return [...prev, voiceMsg];
+      });
+      
+      // 保存到 localStorage
+      if (activeChatId) {
+        try {
+          const stored = window.localStorage.getItem(
+            `${CHAT_STORAGE_PREFIX}${activeChatId}`
+          );
+          const existing = stored ? (JSON.parse(stored) as UiMessage[]) : [];
+          const nextId = existing.length ? existing[existing.length - 1].id + 1 : 1;
+          const voiceMsg: UiMessage = {
+            id: nextId,
+            from: "me",
+            text: "",
+            timeLabel,
+            timestamp,
+            isVoice: true,
+            voiceDuration: recordingTime,
+            voiceText: voiceText.trim()
+          };
+          window.localStorage.setItem(
+            `${CHAT_STORAGE_PREFIX}${activeChatId}`,
+            JSON.stringify([...existing, voiceMsg])
+          );
+        } catch {
+          // ignore
+        }
+      }
     }
     setVoiceModalOpen(false);
     setRecordingTime(0);
@@ -772,7 +822,42 @@ export function WeChatScreen() {
                   className={`chat-bubble chat-bubble-${m.from === "me" ? "me" : "other"
                     }`}
                 >
-                  <div className="chat-bubble-text">{m.text}</div>
+                  {m.isVoice ? (
+                    <div
+                      className="chat-voice-bubble"
+                      onClick={() => {
+                        setExpandedVoiceId(
+                          expandedVoiceId === m.id ? null : m.id
+                        );
+                      }}
+                    >
+                      <div className="chat-voice-waves">
+                        {Array.from({ length: 5 }).map((_, i) => (
+                          <div
+                            key={i}
+                            className="chat-voice-wave"
+                            style={{
+                              animationDelay: `${i * 0.1}s`
+                            }}
+                          />
+                        ))}
+                      </div>
+                      <div className="chat-voice-duration">
+                        {m.voiceDuration
+                          ? `${Math.floor(m.voiceDuration / 60)}:${String(
+                              m.voiceDuration % 60
+                            ).padStart(2, "0")}`
+                          : "0:00"}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="chat-bubble-text">{m.text}</div>
+                  )}
+                  {m.isVoice && expandedVoiceId === m.id && m.voiceText && (
+                    <div className="chat-voice-text-expanded">
+                      {m.voiceText}
+                    </div>
+                  )}
                 </div>
                 {m.from === "me" && (
                   <div className="chat-avatar chat-avatar-me">
