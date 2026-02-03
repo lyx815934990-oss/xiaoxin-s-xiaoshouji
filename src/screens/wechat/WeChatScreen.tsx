@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useSettings } from "../../context/SettingsContext";
 import { sendChatRequest, type ChatMessage } from "../../services/aiClient";
+import { WeChatMePage } from "./WeChatMePage";
 
-type WechatTab = "chats" | "moments";
+type WechatTab = "chats" | "moments" | "me";
 
 interface UiMessage {
   id: number;
@@ -97,6 +98,8 @@ export function WeChatScreen() {
   const [creatingOpen, setCreatingOpen] = useState(false);
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
   const [expandedVoiceId, setExpandedVoiceId] = useState<number | null>(null);
+  const [voiceTypedIds, setVoiceTypedIds] = useState<Set<number>>(new Set());
+  const [voiceTypingText, setVoiceTypingText] = useState<Record<number, string>>({});
 
   const createUserMessage = (text: string): UiMessage => {
     const now = new Date();
@@ -192,7 +195,8 @@ export function WeChatScreen() {
             `你的角色身份：${profile.characterIdentity || "未设置"}` +
             (profile.chatStyle
               ? `。你的说话风格：${profile.chatStyle}`
-              : "")
+              : "") +
+            `\n\n重要提示：当你发送语音消息时，语音内容只能包含实际说出口的话和声音相关的描述（如语气、语调、声音特点等，可以用括号标注如"（轻声说）"、"（语气温柔）"等），不要包含任何心理活动、内心想法、旁白或动作描述。不要使用[语音]这样的标记。心理活动应该用普通文本消息发送，而不是语音消息。`
         }
         : null,
     ];
@@ -237,33 +241,7 @@ export function WeChatScreen() {
           setLoading(false);
           setPendingUserTurns([]);
           // 生成完成后，确保消息保存到正确的聊天记录
-          try {
-            const currentMessages = messages;
-            const allMessages = [
-              ...currentMessages,
-              ...segments.map((text, idx) => {
-                const now = new Date();
-                const ts = now.getTime();
-                const label = `${now.getHours().toString().padStart(2, "0")}:${now
-                  .getMinutes()
-                  .toString()
-                  .padStart(2, "0")}`;
-                return {
-                  id: (currentMessages.length || 0) + idx + 1,
-                  from: "other" as const,
-                  text,
-                  timeLabel: label,
-                  timestamp: ts
-                };
-              })
-            ];
-            window.localStorage.setItem(
-              `${CHAT_STORAGE_PREFIX}${targetChatId}`,
-              JSON.stringify(allMessages)
-            );
-          } catch {
-            // ignore
-          }
+          // 注意：这里不再需要，因为每条消息已经在 showSegment 中保存了
           return;
         }
 
@@ -275,6 +253,51 @@ export function WeChatScreen() {
           .toString()
           .padStart(2, "0")}`;
 
+        // 随机决定是否发送语音消息（可调整概率，当前为 50%）
+        // 如果想总是发送语音消息，改为: Math.random() < 1.0
+        // 如果想从不发送语音消息，改为: Math.random() < 0.0
+        const VOICE_PROBABILITY = 0.5; // 调整这个值：0.0 = 从不发送，1.0 = 总是发送
+        const isVoice = Math.random() < VOICE_PROBABILITY && text.length > 10;
+
+        // 如果是语音消息，需要提取或生成只包含声音描述的内容（不含心理活动）
+        let voiceText = text;
+        if (isVoice) {
+          // 移除标记性文字（如 [语音]、[语音消息] 等）
+          voiceText = text
+            .replace(/\[语音[^\]]*\]/gi, "") // 移除 [语音]、[语音消息] 等标记
+            .replace(/\[.*?\]/g, "") // 移除所有方括号内容
+            .replace(/\*[^*]*\*/g, "") // 移除 *...* 格式的心理活动
+            .replace(/【[^】]*】/g, "") // 移除 【...】 格式的旁白
+            .trim();
+
+          // 保留声音相关的括号描述（如（轻声说）、（笑着说）、（语气温柔）等）
+          // 这些括号内容通常包含：说、道、语气、语调、声音等关键词
+          // 不包含：想、内心、思考、动作等非声音相关的词
+          const voiceKeywords = /(说|道|语气|语调|声音|轻声|大声|小声|温柔|冷淡|开心|难过|兴奋|平静|紧张|放松)/;
+          voiceText = voiceText.replace(/（([^）]+)）/g, (match, content) => {
+            // 如果括号内容包含声音相关关键词，保留；否则移除
+            return voiceKeywords.test(content) ? match : "";
+          });
+          voiceText = voiceText.replace(/\(([^)]+)\)/g, (match, content) => {
+            // 如果括号内容包含声音相关关键词，保留；否则移除
+            return voiceKeywords.test(content) ? match : "";
+          });
+
+          // 清理多余空格
+          voiceText = voiceText.replace(/\s+/g, " ").trim();
+
+          // 如果提取后为空，则使用原文本（但会在系统提示中要求 AI 只生成声音描述）
+          if (!voiceText) {
+            voiceText = text;
+          }
+        }
+
+        // 计算语音时长：中文语速大约每秒3-4个字，这里使用每秒3.5个字来计算
+        // 最少1秒，最多不超过60秒
+        const voiceDuration = isVoice
+          ? Math.max(1, Math.min(60, Math.ceil(voiceText.length / 3.5)))
+          : undefined;
+
         // 更新消息列表（只在当前聊天页时更新 UI）
         const currentChatId = activeChatId ?? "aiFriend";
         if (currentChatId === targetChatId) {
@@ -285,9 +308,12 @@ export function WeChatScreen() {
               {
                 id: nextId,
                 from: "other",
-                text,
+                text: isVoice ? "" : text,
                 timeLabel: label,
-                timestamp: ts
+                timestamp: ts,
+                isVoice,
+                voiceDuration,
+                voiceText: isVoice ? voiceText : undefined
               }
             ];
           });
@@ -299,12 +325,59 @@ export function WeChatScreen() {
             `${CHAT_STORAGE_PREFIX}${targetChatId}`
           );
           const existing = stored ? (JSON.parse(stored) as UiMessage[]) : [];
+
+          // 使用相同的语音判断逻辑
+          const VOICE_PROBABILITY = 0.5; // 调整这个值：0.0 = 从不发送，1.0 = 总是发送
+          const isVoice = Math.random() < VOICE_PROBABILITY && text.length > 10;
+
+          // 如果是语音消息，需要提取或生成只包含声音描述的内容（不含心理活动）
+          let voiceText = text;
+          if (isVoice) {
+            // 移除标记性文字（如 [语音]、[语音消息] 等）
+            voiceText = text
+              .replace(/\[语音[^\]]*\]/gi, "") // 移除 [语音]、[语音消息] 等标记
+              .replace(/\[.*?\]/g, "") // 移除所有方括号内容
+              .replace(/\*[^*]*\*/g, "") // 移除 *...* 格式的心理活动
+              .replace(/【[^】]*】/g, "") // 移除 【...】 格式的旁白
+              .trim();
+
+            // 保留声音相关的括号描述（如（轻声说）、（笑着说）、（语气温柔）等）
+            // 这些括号内容通常包含：说、道、语气、语调、声音等关键词
+            // 不包含：想、内心、思考、动作等非声音相关的词
+            const voiceKeywords = /(说|道|语气|语调|声音|轻声|大声|小声|温柔|冷淡|开心|难过|兴奋|平静|紧张|放松)/;
+            voiceText = voiceText.replace(/（([^）]+)）/g, (match, content) => {
+              // 如果括号内容包含声音相关关键词，保留；否则移除
+              return voiceKeywords.test(content) ? match : "";
+            });
+            voiceText = voiceText.replace(/\(([^)]+)\)/g, (match, content) => {
+              // 如果括号内容包含声音相关关键词，保留；否则移除
+              return voiceKeywords.test(content) ? match : "";
+            });
+
+            // 清理多余空格
+            voiceText = voiceText.replace(/\s+/g, " ").trim();
+
+            // 如果提取后为空，则使用原文本
+            if (!voiceText) {
+              voiceText = text;
+            }
+          }
+
+          // 计算语音时长：中文语速大约每秒3-4个字，这里使用每秒3.5个字来计算
+          // 最少1秒，最多不超过60秒
+          const voiceDuration = isVoice
+            ? Math.max(1, Math.min(60, Math.ceil(voiceText.length / 3.5)))
+            : undefined;
+
           const newMessage: UiMessage = {
             id: existing.length ? existing[existing.length - 1].id + 1 : 1,
             from: "other",
-            text,
+            text: isVoice ? "" : text,
             timeLabel: label,
-            timestamp: ts
+            timestamp: ts,
+            isVoice,
+            voiceDuration,
+            voiceText: isVoice ? voiceText : undefined
           };
           window.localStorage.setItem(
             `${CHAT_STORAGE_PREFIX}${targetChatId}`,
@@ -528,7 +601,7 @@ export function WeChatScreen() {
         .getMinutes()
         .toString()
         .padStart(2, "0")}`;
-      
+
       setMessages((prev) => {
         const nextId = prev.length ? prev[prev.length - 1].id + 1 : 1;
         const voiceMsg: UiMessage = {
@@ -543,7 +616,7 @@ export function WeChatScreen() {
         };
         return [...prev, voiceMsg];
       });
-      
+
       // 保存到 localStorage
       if (activeChatId) {
         try {
@@ -589,6 +662,9 @@ export function WeChatScreen() {
   }, [activeChatId, mode]);
 
   const renderBody = () => {
+    if (tab === "me") {
+      return <WeChatMePage />;
+    }
     if (tab === "moments") {
       return (
         <div className="wechat-list">
@@ -826,36 +902,94 @@ export function WeChatScreen() {
                     <div
                       className="chat-voice-bubble"
                       onClick={() => {
+                        const isExpanding = expandedVoiceId !== m.id;
                         setExpandedVoiceId(
                           expandedVoiceId === m.id ? null : m.id
                         );
+
+                        // 如果是首次展开，启动打字机效果
+                        if (isExpanding && m.voiceText && !voiceTypedIds.has(m.id)) {
+                          const fullText = m.voiceText;
+                          setVoiceTypingText((prev) => ({ ...prev, [m.id]: "" }));
+                          let currentIndex = 0;
+                          const typeInterval = setInterval(() => {
+                            if (currentIndex < fullText.length) {
+                              setVoiceTypingText((prev) => ({
+                                ...prev,
+                                [m.id]: fullText.slice(0, currentIndex + 1)
+                              }));
+                              currentIndex++;
+                            } else {
+                              clearInterval(typeInterval);
+                              setVoiceTypedIds((prev) => new Set(prev).add(m.id));
+                              setVoiceTypingText((prev) => {
+                                const next = { ...prev };
+                                delete next[m.id];
+                                return next;
+                              });
+                            }
+                          }, 30); // 每30ms打一个字
+                        }
                       }}
                     >
-                      <div className="chat-voice-waves">
-                        {Array.from({ length: 5 }).map((_, i) => (
-                          <div
-                            key={i}
-                            className="chat-voice-wave"
-                            style={{
-                              animationDelay: `${i * 0.1}s`
-                            }}
-                          />
-                        ))}
-                      </div>
-                      <div className="chat-voice-duration">
-                        {m.voiceDuration
-                          ? `${Math.floor(m.voiceDuration / 60)}:${String(
-                              m.voiceDuration % 60
-                            ).padStart(2, "0")}`
-                          : "0:00"}
-                      </div>
+                      {m.from === "other" ? (
+                        <>
+                          <div className="chat-voice-duration">
+                            {m.voiceDuration
+                              ? `${Math.floor(m.voiceDuration / 60)}:${String(
+                                m.voiceDuration % 60
+                              ).padStart(2, "0")}`
+                              : "0:00"}
+                          </div>
+                          <div className={`chat-voice-wifi chat-voice-wifi-${m.from}`}>
+                            <svg
+                              width="20"
+                              height="20"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              xmlns="http://www.w3.org/2000/svg"
+                            >
+                              <path
+                                d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.07 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"
+                                fill="currentColor"
+                              />
+                            </svg>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className={`chat-voice-wifi chat-voice-wifi-${m.from}`}>
+                            <svg
+                              width="20"
+                              height="20"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              xmlns="http://www.w3.org/2000/svg"
+                            >
+                              <path
+                                d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.07 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"
+                                fill="currentColor"
+                              />
+                            </svg>
+                          </div>
+                          <div className="chat-voice-duration">
+                            {m.voiceDuration
+                              ? `${Math.floor(m.voiceDuration / 60)}:${String(
+                                m.voiceDuration % 60
+                              ).padStart(2, "0")}`
+                              : "0:00"}
+                          </div>
+                        </>
+                      )}
                     </div>
                   ) : (
                     <div className="chat-bubble-text">{m.text}</div>
                   )}
                   {m.isVoice && expandedVoiceId === m.id && m.voiceText && (
                     <div className="chat-voice-text-expanded">
-                      {m.voiceText}
+                      {voiceTypingText[m.id] !== undefined
+                        ? voiceTypingText[m.id]
+                        : m.voiceText}
                     </div>
                   )}
                 </div>
@@ -1263,7 +1397,14 @@ export function WeChatScreen() {
             <span className="wechat-bottom-icon">✦</span>
             <span className="wechat-bottom-label">发现</span>
           </button>
-          <button type="button" className="wechat-bottom-item wechat-bottom-item-disabled">
+          <button
+            type="button"
+            className={`wechat-bottom-item ${tab === "me" ? "wechat-bottom-item-active" : ""}`}
+            onClick={() => {
+              setTab("me");
+              setActiveChatId(null);
+            }}
+          >
             <span className="wechat-bottom-icon">♡</span>
             <span className="wechat-bottom-label">我</span>
           </button>

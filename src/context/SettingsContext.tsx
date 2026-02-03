@@ -60,6 +60,13 @@ interface SettingsContextValue extends SettingsState {
   updateWorldbookEntry: (id: string, patch: Partial<WorldbookEntry>) => void;
   removeWorldbookEntry: (id: string) => void;
   updateChatProfile: (id: string, patch: Partial<ChatProfile>) => void;
+  updateUserProfile: (patch: Partial<UserProfile>) => void;
+  addEmojiGroup: (name: string) => string;
+  updateEmojiGroup: (groupId: string, patch: Partial<EmojiGroup>) => void;
+  removeEmojiGroup: (groupId: string) => void;
+  addEmoji: (groupId: string, emoji: Omit<EmojiItem, "id">) => void;
+  updateEmoji: (groupId: string, emojiId: string, patch: Partial<EmojiItem>) => void;
+  removeEmoji: (groupId: string, emojiId: string) => void;
 }
 
 const STORAGE_KEY = "miniOtomePhoneSettings_v1";
@@ -89,7 +96,13 @@ const defaultState: SettingsState = {
     model: ""
   },
   worldbookEntries: defaultWorldbookEntries,
-  chatProfiles: defaultChatProfiles
+  chatProfiles: defaultChatProfiles,
+  userProfile: {
+    avatarEmoji: "👤",
+    avatarUrl: "",
+    emojiPackUrl: "",
+    emojiGroups: []
+  }
 };
 
 const SettingsContext = createContext<SettingsContextValue | null>(null);
@@ -177,7 +190,12 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         ...defaultState,
         ...parsed,
         worldbookEntries,
-        chatProfiles
+        chatProfiles,
+        userProfile: {
+          ...defaultState.userProfile,
+          ...(parsed.userProfile ?? {}),
+          emojiGroups: parsed.userProfile?.emojiGroups ?? defaultState.userProfile.emojiGroups
+        }
       };
     } catch {
       return defaultState;
@@ -263,6 +281,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
               ...patch
             } as ChatProfile
           }
+        })),
+      updateUserProfile: (patch) =>
+        setState((prev) => ({
+          ...prev,
+          userProfile: { ...prev.userProfile, ...patch }
         }))
     };
   }, [state]);
